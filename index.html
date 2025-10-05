@@ -228,7 +228,6 @@
     </main>
 
     <script>
-        // --- Constants & Global State ---
         const MESSAGE_CHUNK_SIZE = 30;
         const DEBOUNCE_DELAY = 250;
 
@@ -245,12 +244,10 @@
         let currentRenderIndex = 0;
         let currentConversation = null;
 
-        // --- Event Listeners ---
         fileInput.addEventListener('change', handleFiles);
         searchInput.addEventListener('input', debounce(handleSearch, DEBOUNCE_DELAY));
         chatContainer.addEventListener('scroll', handleLazyLoad);
 
-        // --- Utility Functions ---
         function debounce(func, delay) {
             let timeout;
             return function(...args) {
@@ -259,7 +256,6 @@
             };
         }
 
-        // --- Core Logic: File Handling and Parsing ---
         async function handleFiles(event) {
             const files = event.target.files;
             if (!files.length) return;
@@ -278,7 +274,7 @@
                     if (rootNodeId) {
                         conversation.rootNodeId = rootNodeId;
                         conversation.searchableText = createSearchableText(conversation);
-                        conversation.branches = findEndNodesAndBuildPaths(conversation); // Pre-compute branches
+                        conversation.branches = findEndNodesAndBuildPaths(conversation);
                         return conversation;
                     } else { throw new Error("Could not find the root node."); }
                 } catch (error) {
@@ -313,37 +309,6 @@
             return fullText;
         }
 
-        function findRootNodeId(mapping) {
-            if (!mapping) return null;
-            if (mapping['client-created-root']) return 'client-created-root';
-            
-            const mappingKeys = Object.keys(mapping);
-            const allChildren = new Set();
-            for (const key of mappingKeys) {
-                 if (mapping[key] && mapping[key].children) {
-                    mapping[key].children.forEach(childId => allChildren.add(childId));
-                 }
-            }
-            const potentialRoots = mappingKeys.filter(key => !allChildren.has(key));
-            return potentialRoots.length > 0 ? potentialRoots[0] : null;
-        }
-        
-        function findEndNodesAndBuildPaths(conversation) {
-            const { mapping } = conversation;
-            const endNodes = Object.keys(mapping).filter(id => mapping[id] && mapping[id].children.length === 0);
-            
-            return endNodes.map(endId => {
-                let path = [];
-                let currentId = endId;
-                while(currentId && mapping[currentId]) {
-                    path.unshift(mapping[currentId]);
-                    currentId = mapping[currentId].parent;
-                }
-                return path;
-            }).filter(path => path.length > 0);
-        }
-
-        // --- UI Rendering Logic ---
         function renderChatList() {
             chatList.innerHTML = '';
             conversations.forEach((conversation) => {
@@ -378,6 +343,21 @@
             });
         }
 
+        function findRootNodeId(mapping) {
+            if (!mapping) return null;
+            if (mapping['client-created-root']) return 'client-created-root';
+            
+            const mappingKeys = Object.keys(mapping);
+            const allChildren = new Set();
+            for (const key of mappingKeys) {
+                 if (mapping[key] && mapping[key].children) {
+                    mapping[key].children.forEach(childId => allChildren.add(childId));
+                 }
+            }
+            const potentialRoots = mappingKeys.filter(key => !allChildren.has(key));
+            return potentialRoots.length > 0 ? potentialRoots[0] : null;
+        }
+
         function displayConversation(conversationId) {
             document.querySelectorAll('#chat-list li').forEach(li => {
                 li.classList.toggle('active', li.dataset.conversationId === conversationId);
@@ -396,12 +376,29 @@
             const mainBranch = currentConversation.branches.length > 0 ? currentConversation.branches[0] : [];
             renderBranch(mainBranch);
         }
+        
+        function findEndNodesAndBuildPaths(conversation) {
+            const { mapping } = conversation;
+            const endNodes = Object.keys(mapping).filter(id => mapping[id] && mapping[id].children.length === 0);
+            
+            return endNodes.map(endId => {
+                let path = [];
+                let currentId = endId;
+                while(currentId && mapping[currentId]) {
+                    path.unshift(mapping[currentId]);
+                    currentId = mapping[currentId].parent;
+                }
+                return path;
+            }).filter(path => path.length > 0);
+        }
 
         function renderBranch(branch, scrollTargetId = null) {
             chatContainer.innerHTML = '';
             currentBranch = branch;
             currentRenderIndex = 0;
-            chatContainer.scrollTop = 0;
+            if (!scrollTargetId) {
+                chatContainer.scrollTop = 0;
+            }
             renderMoreMessages();
 
             if (scrollTargetId) {
@@ -415,7 +412,6 @@
         }
         
         function handleLazyLoad() {
-            // Load more messages when user is 200px from the bottom
             if (chatContainer.scrollTop + chatContainer.clientHeight >= chatContainer.scrollHeight - 200) {
                 renderMoreMessages();
             }
@@ -510,11 +506,11 @@
                 const prevButton = document.createElement('button');
                 prevButton.className = 'branch-nav';
                 prevButton.innerHTML = '&lt;';
-                prevButton.onclick = () => switchBranch(parentNode, branchIndex - 1);
+                prevButton.onclick = (e) => switchBranch(parentNode, branchIndex - 1, e.currentTarget.closest('.message-wrapper'));
                 const nextButton = document.createElement('button');
                 nextButton.className = 'branch-nav';
                 nextButton.innerHTML = '&gt;';
-                nextButton.onclick = () => switchBranch(parentNode, branchIndex + 1);
+                nextButton.onclick = (e) => switchBranch(parentNode, branchIndex + 1, e.currentTarget.closest('.message-wrapper'));
                 const statusSpan = document.createElement('span');
                 statusSpan.textContent = `${branchIndex + 1} / ${parentNode.children.length}`;
                 prevButton.disabled = branchIndex <= 0;
@@ -527,23 +523,15 @@
             return wrapper;
         }
 
-        function switchBranch(parentNode, newBranchIndex) {
-            const topVisibleNode = findTopVisibleNode();
+        function switchBranch(parentNode, newBranchIndex, currentWrapperElement) {
+            // --- SCROLL FIX ---
+            const scrollTargetId = currentWrapperElement.dataset.nodeId;
             
             const newTargetChildId = parentNode.children[newBranchIndex];
             const newMainBranch = currentConversation.branches.find(branch => branch.some(node => node.id === newTargetChildId));
             if (newMainBranch) {
-                renderBranch(newMainBranch, topVisibleNode?.dataset.nodeId);
+                renderBranch(newMainBranch, scrollTargetId);
             }
-        }
-        
-        function findTopVisibleNode() {
-            const containerRect = chatContainer.getBoundingClientRect();
-            for(const elem of chatContainer.querySelectorAll('.message-wrapper')) {
-                const elemRect = elem.getBoundingClientRect();
-                if(elemRect.top >= containerRect.top) return elem;
-            }
-            return null;
         }
 
         function processCitations(text, metadata) {
@@ -585,4 +573,4 @@
         }
     </script>
 </body>
-</html>```
+</html>
